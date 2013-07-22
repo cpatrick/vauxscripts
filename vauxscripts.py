@@ -25,20 +25,51 @@
 
 import json
 import csv
-import sys
 import os
+import sys
 
+from clint import args
 from bs4 import BeautifulSoup
 import requests
+
+
+def generate_feature(lon, lat, props):
+    """Generate a feature to drop in a GeoJSON feature collection.
+    """
+    feature = dict()
+    feature['type'] = 'Feature',
+    feature['geometry'] = dict()
+    feature['geometry']['type'] = 'Point'
+    feature['geometry']['coordinates'] = [lon, lat]
+    feature['properties'] = dict(props)
+    return feature
 
 
 def load_from_csv(filename):
     """Load the csv into a big dictionary in memory.
     """
+    feature_collection = dict()
+    feature_collection['type'] = 'FeatureCollection'
+    feature_collection['features'] = list()
     with open(filename, 'rb') as csvfile:
         csv_reader = csv.DictReader(csvfile)
+        new_row = dict()
         for row in csv_reader:
-            print(json.dumps(row))
+            for k, v in row.iteritems():
+                new_row[k.strip(' "')] = v.strip(' "')
+            base_url = 'http://maps.googleapis.com/maps/api/geocode/json?'
+            url = '{}address={}&sensor=false'.format(base_url, new_row['ZIP'])
+            resp = requests.get(url)
+            json_location = resp.json()
+            if len(json_location['results']) >= 1:
+                geoloc = json_location['results'][0]['geometry']['location']
+            else:
+                geoloc = {'lng': 0, 'lat': 0}
+                print(json_location)
+            lon = geoloc['lng']
+            lat = geoloc['lat']
+            feature_collection = generate_feature(lon, lat, new_row)
+    return feature_collection
 
 
 def get_char_images():
@@ -97,12 +128,42 @@ def get_questions_and_choices():
 def main():
     """Load the specified csv file and convert it to a GeoJSON.
     """
-    print(get_questions_and_choices())
-    #print("Downloading images")
-    #get_char_images()
-    #dataset = load_from_csv(sys.argv[1])
-    #print(dataset)
+    arguments = dict(args.grouped)
 
+    command = args.get(0)
+
+    if command == 'questions':
+        data = json.dumps(get_questions_and_choices(), indent=2)
+        if '-o' in arguments:
+            with open(arguments['-o'][0], 'wb') as outfile:
+                outfile.write(data)
+        elif '--output' in arguments:
+            with open(arguments['--output'][0], 'wb') as outfile:
+                outfile.write(data)
+        else:
+            print(data)
+    elif command == 'images':
+        get_char_images()
+    elif command == 'locations':
+        if '-i' in arguments:
+            infile = arguments['-i'][0]
+        elif '--input' in arguments:
+            infile = arguments['--input'][0]
+        else:
+            print('Set input csv with "-i" or "--input."')
+            sys.exit(-1)
+
+        data = json.dumps(load_from_csv(infile), indent=2)
+        if '-o' in arguments:
+            with open(arguments['-o'][0], 'wb') as outfile:
+                outfile.write(data)
+        elif '--output' in arguments:
+            with open(arguments['--output'][0], 'wb') as outfile:
+                outfile.write(data)
+        else:
+            print(data)
+    else:
+        print('Unrecognized command.')
 
 if __name__ == '__main__':
     main()
