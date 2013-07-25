@@ -33,11 +33,16 @@ from bs4 import BeautifulSoup
 import requests
 
 
-def generate_feature(lon, lat, props):
+def generate_feature_from_zip(zip_code, corrs, props):
     """Generate a feature to drop in a GeoJSON feature collection.
     """
+    try:
+        (lon, lat) = corrs[zip_code]
+    except KeyError:
+        (lon, lat) = (0, 0)
+        print('Could not find the location of {}'.format(zip_code))
     feature = dict()
-    feature['type'] = 'Feature',
+    feature['type'] = 'Feature'
     feature['geometry'] = dict()
     feature['geometry']['type'] = 'Point'
     feature['geometry']['coordinates'] = [lon, lat]
@@ -45,7 +50,7 @@ def generate_feature(lon, lat, props):
     return feature
 
 
-def load_from_csv(filename):
+def load_from_csv(filename, corrs):
     """Load the csv into a big dictionary in memory.
     """
     feature_collection = dict()
@@ -57,19 +62,21 @@ def load_from_csv(filename):
         for row in csv_reader:
             for k, v in row.iteritems():
                 new_row[k.strip(' "')] = v.strip(' "')
-            base_url = 'http://maps.googleapis.com/maps/api/geocode/json?'
-            url = '{}address={}&sensor=false'.format(base_url, new_row['ZIP'])
-            resp = requests.get(url)
-            json_location = resp.json()
-            if len(json_location['results']) >= 1:
-                geoloc = json_location['results'][0]['geometry']['location']
-            else:
-                geoloc = {'lng': 0, 'lat': 0}
-                print(json_location)
-            lon = geoloc['lng']
-            lat = geoloc['lat']
-            feature_collection = generate_feature(lon, lat, new_row)
+            zip_code = new_row['ZIP']
+            feature_collection['features'].append(
+                generate_feature_from_zip(zip_code, corrs, new_row))
     return feature_collection
+
+
+def get_geodictionary_from_file(filename):
+    """Load the correspondence file into a correspondence dictionary
+       that links zip codes to lon-lat coordinates."""
+    corrs = dict()
+    with open(filename, 'rb') as corr_file:
+        corr_file = csv.reader(corr_file, delimiter='\t')
+        for row in corr_file:
+            corrs[row[1]] = (row[-2], row[-3])
+    return corrs
 
 
 def get_char_images():
@@ -153,7 +160,18 @@ def main():
             print('Set input csv with "-i" or "--input."')
             sys.exit(-1)
 
-        data = json.dumps(load_from_csv(infile), indent=2)
+        if '-c' in arguments:
+            corrfile = arguments['-c'][0]
+        elif '--correspondences' in arguments:
+            corrfile = arguments['--correspondences'][0]
+        else:
+            print('Set the correspondences between zips and geographic ' +
+                  'locations with "-c" or "--correspondences."')
+            sys.exit(-1)
+
+        corrs = get_geodictionary_from_file(corrfile)
+
+        data = json.dumps(load_from_csv(infile, corrs), indent=2)
         if '-o' in arguments:
             with open(arguments['-o'][0], 'wb') as outfile:
                 outfile.write(data)
